@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:intl/intl.dart'; // 리포트 시간 표시용
+import 'package:sensors_plus/sensors_plus.dart'; // 가속도 센서 데이터 수집용
 
 void main() {
   runApp(const MyApp());
@@ -31,39 +32,32 @@ class SafetyDetectionPage extends StatefulWidget {
 }
 
 class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
+  // 상태 관리
+  String statusMessage = "정상 주행"; // 상태 메시지
+  Timer? accelerationTimer; // 가속/감속 체크 타이머
+  Timer? roughSurfaceTimer; // 울퉁불퉁 체크 타이머
+  bool isDisplayingWarning = false; // 경고 상태
+  bool isPedestrianRoad = false; // 인도 여부
+
+  // 점수 및 위반 사항 기록
+  int totalScore = 100; // 초기 점수
+  List<Map<String, String>> violations = []; // 위반 기록 (시간, 사유)
+
+  // 상수
+  final double thresholdAcceleration = 15.0; // 급가속 임계값
+  final double thresholdDeceleration = -6.0; // 급감속 임계값
+  final double changeThreshold = 0.5; // 자잘한 변화 감지 기준 (가속도의 변화량)
+  final int changeFrequencyLimit = 80; // 2초 동안 자잘한 변화 횟수 (울퉁불퉁 경고 기준)
+  final Duration warningDuration = const Duration(seconds: 2); // 경고 메시지 출력 시간
+
   // 가속도 데이터
-  // List<double> accelerationHistory = []; // 모든 가속도 값을 저장
-  // accelerationX, accelerationY, accelerationZ 저장
   List<double> accelerationHistoryX = [];
   List<double> accelerationHistoryY = [];
   List<double> accelerationHistoryZ = [];
-  double previousAccelerationForAbruption = 0.0; // 급감속/급가속 체크용
-  double currentAccelerationForAbruption = 0.0; // 급감속/급가속 체크용
-  double previousAccelerationForPedestrian = 0.0; // 인도/차도 체크용
-  double currentAccelerationForPedestrian = 0.0; // 인도/차도 체크용
-
-  // 중력 값 (Low-Pass Filter로 계산)
-  double gravityX = 0.0, gravityY = 0.0, gravityZ = 0.0;
-  double accelerationX = 0.0, accelerationY = 0.0, accelerationZ = 0.0;
-  final double alpha = 0.8; // 필터 상수 (값이 작을수록 중력 변화가 느려짐)
-
-  // 상태 관리
-  String statusMessage = "정상 주행"; // 기본 메시지
-  Timer? accelerationTimer; // 가속/감속 체크용 타이머
-  Timer? roughSurfaceTimer; // 울퉁불퉁 체크용 타이머
-  bool isDisplayingWarning = false; // 경고 메시지 출력 여부
-  bool isPedestrianRoad = false; // 울퉁불퉁한 길 여부
-
-  // 상수
-  final double thresholdAcceleration = 3.0; // 급가속 임계값
-  final double thresholdDeceleration = -3.0; // 급감속 임계값
-  final double changeThreshold = 0.5; // 자잘한 변화 감지 기준 (가속도의 변화량)
-  final int changeFrequencyLimit = 80; // 2초 동안 자잘한 변화 횟수 (울퉁불퉁 경고 기준)
-  final Duration accelerationCheckInterval =
-      const Duration(seconds: 1); // 가속/감속 체크 주기
-  final Duration roughSurfaceCheckInterval =
-      const Duration(seconds: 2); // 울퉁불퉁 체크 주기
-  final Duration warningDuration = const Duration(seconds: 2); // 경고 메시지 출력 시간
+  double gravityX = 0.0,
+      gravityY = 0.0,
+      gravityZ = 0.0; // 중력 값 (Low-Pass Filter)
+  final double alpha = 0.8; // 필터 상수
 
   @override
   void initState() {
@@ -71,77 +65,50 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
 
     // 가속도 데이터 수집
     accelerometerEvents.listen((AccelerometerEvent event) {
-      // 중력 계산 (Low-Pass Filter)
       gravityX = alpha * gravityX + (1 - alpha) * event.x;
       gravityY = alpha * gravityY + (1 - alpha) * event.y;
       gravityZ = alpha * gravityZ + (1 - alpha) * event.z;
 
-      // 중력 제거 후, 실제 움직임 계산 (High-Pass Filter)
-
-      // currentAcceleration = sqrt(
-      //   pow(event.x - gravityX, 2) +
-      //       pow(event.y - gravityY, 2) +
-      //       pow(event.z - gravityZ, 2),
-      // );
-      accelerationX = event.x - gravityX;
-      accelerationY = event.y - gravityY;
-      accelerationZ = event.z - gravityZ;
-      accelerationHistoryX.add(accelerationX);
-      accelerationHistoryY.add(accelerationY);
-      accelerationHistoryZ.add(accelerationZ);
-
-      // 가속도 데이터 기록
-      // accelerationHistory.add(currentAcceleration);
-
-      // print high pass filter value
-      debugPrint(
-          "x: ${event.x - gravityX}, y: ${event.y - gravityY}, z: ${event.z - gravityZ}");
-
-      // debugPrint("acceleration.length: ${accelerationHistory.length}");
+      accelerationHistoryX.add(event.x - gravityX);
+      accelerationHistoryY.add(event.y - gravityY);
+      accelerationHistoryZ.add(event.z - gravityZ);
 
       setState(() {});
     });
 
     // 울퉁불퉁한 길 체크
-    roughSurfaceTimer = Timer.periodic(roughSurfaceCheckInterval, (timer) {
+    roughSurfaceTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       int recentChanges = _calculateRecentChanges();
       if (recentChanges >= changeFrequencyLimit) {
-        // debugPrint("울퉁불퉁한 인도 주행 감지!sdfasdfs");
         isPedestrianRoad = true;
-        _updateStatusMessage("⚠️ 인도 주행 감지! 지정된 도로로 이동하세요");
+        _triggerWarning("⚠️ 인도 주행 감지! 지정된 도로로 이동하세요", "인도 주행", 2);
       } else if (!isDisplayingWarning) {
-        _updateStatusMessage("정상 주행 중입니다");
+        _updateStatusMessage("정상 주행");
         isPedestrianRoad = false;
       }
     });
 
     // 급가속/급감속 체크
-    // 1초 간 가속도 평균 값
-    // 진행 방향인 z축 가속도에 가중치 0.8을 주어 가속도 크기 계산
-    // 초당 5개의 샘플을 가정하여 5개의 가속도 값을 저장하고 평균을 계산
-    accelerationTimer = Timer.periodic(accelerationCheckInterval, (timer) {
-      double currentAccelerationForAbruptionX = accelerationHistoryX
+    accelerationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      double avgX = accelerationHistoryX
               .sublist(accelerationHistoryX.length - 5)
               .reduce((a, b) => a + b) /
           5;
-      double currentAccelerationForAbruptionY = accelerationHistoryY
+      double avgY = accelerationHistoryY
               .sublist(accelerationHistoryY.length - 5)
               .reduce((a, b) => a + b) /
           5;
-      double currentAccelerationForAbruptionZ = accelerationHistoryZ
+      double avgZ = accelerationHistoryZ
               .sublist(accelerationHistoryZ.length - 5)
               .reduce((a, b) => a + b) /
           5;
-      // z축 가속도에 가중치 0.8을 주어 가속도 크기 계산
-      currentAccelerationForAbruption =
-          (0.8 * currentAccelerationForAbruptionZ +
-              0.1 * currentAccelerationForAbruptionX +
-              0.1 * currentAccelerationForAbruptionY);
 
-      if (currentAccelerationForAbruption > thresholdAcceleration) {
-        _triggerWarning("⚠️ 급가속 감지! 속도를 천천히 올리세요");
-      } else if (currentAccelerationForAbruption < thresholdDeceleration) {
-        _triggerWarning("⚠️ 급감속 감지! 속도를 천천히 줄이세요");
+      double weightedAcceleration = (0.8 * avgZ + 0.1 * avgX + 0.1 * avgY);
+
+      if (weightedAcceleration > thresholdAcceleration) {
+        _triggerWarning("⚠️ 급가속 감지! 속도를 천천히 올리세요", "급가속", 1);
+      } else if (weightedAcceleration < thresholdDeceleration) {
+        _triggerWarning("⚠️ 급감속 감지! 속도를 천천히 줄이세요", "급감속", 1);
       } else if (!isDisplayingWarning && !isPedestrianRoad) {
         _updateStatusMessage("정상 주행");
       }
@@ -150,12 +117,8 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
 
   // 최근 2초 동안 가속도 변화 횟수 계산
   int _calculateRecentChanges() {
-    if (accelerationHistoryY.length < 2) return 0;
-
     int changeCount = 0;
-    int sampleCount = roughSurfaceCheckInterval.inSeconds *
-        100; // Assuming 100 samples per second
-
+    int sampleCount = 200; // Assuming 100 samples per second
     for (int i = accelerationHistoryY.length - 1;
         i > 0 && i > accelerationHistoryY.length - sampleCount;
         i--) {
@@ -170,23 +133,27 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
         changeCount++;
       }
     }
-
-    debugPrint("changeCount: $changeCount");
     return changeCount;
   }
 
-  // 경고 메시지 출력 함수
-  void _triggerWarning(String message) {
+  // 경고 메시지 출력 및 점수 차감
+  void _triggerWarning(String message, String reason, int deduction) {
     if (!isDisplayingWarning) {
       setState(() {
-        statusMessage = message; // 경고 메시지 표시
+        statusMessage = message;
         isDisplayingWarning = true;
+
+        // 점수 차감 및 위반 기록 저장
+        totalScore -= deduction;
+        totalScore = max(0, totalScore); // 점수 음수 방지
+        String currentTime = DateFormat('HH:mm:ss').format(DateTime.now());
+        violations.add({"time": currentTime, "reason": reason});
       });
 
       Timer(warningDuration, () {
         setState(() {
           isDisplayingWarning = false; // 경고 종료 후 상태 복구
-          statusMessage = "정상 주행하고 있습니다"; // 정상 주행 메시지로 복귀
+          statusMessage = "정상 주행"; // 정상 상태로 복귀
         });
       });
     }
@@ -199,13 +166,6 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
         statusMessage = message;
       });
     }
-  }
-
-  @override
-  void dispose() {
-    accelerationTimer?.cancel(); // 타이머 해제
-    roughSurfaceTimer?.cancel(); // 타이머 해제
-    super.dispose();
   }
 
   @override
@@ -235,25 +195,74 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
                 ),
                 textAlign: TextAlign.center,
               ),
-              const Text(
-                '급감속에 대한 가속도 크기: ',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                currentAccelerationForAbruption.toStringAsFixed(2),
-                style: const TextStyle(fontSize: 20),
-              ),
-              const Text(
-                '인도/차도 구별을 위한 가속도 크기: ',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                accelerationHistoryY[accelerationHistoryY.length - 1]
-                    .toStringAsFixed(2),
-                style: const TextStyle(fontSize: 20),
-              ),
             ],
           ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          // 운행 종료 화면으로 이동
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ReportPage(
+                totalScore: totalScore,
+                violations: violations,
+              ),
+            ),
+          );
+        },
+        label: const Text("운행 종료"), // 텍스트 추가
+        tooltip: "운행 종료",
+      ),
+    );
+  }
+}
+
+// 리포트 화면
+class ReportPage extends StatelessWidget {
+  final int totalScore;
+  final List<Map<String, String>> violations;
+
+  const ReportPage(
+      {super.key, required this.totalScore, required this.violations});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('운행 리포트'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "최종 점수: $totalScore/100",
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "위반 사항:",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            violations.isEmpty
+                ? const Text("위반 사항이 없습니다. 안전하게 주행했습니다!")
+                : Expanded(
+                    child: ListView.builder(
+                      itemCount: violations.length,
+                      itemBuilder: (context, index) {
+                        final violation = violations[index];
+                        return ListTile(
+                          title: Text(
+                              "${violation['time']} - ${violation['reason']}"),
+                        );
+                      },
+                    ),
+                  ),
+          ],
         ),
       ),
     );
