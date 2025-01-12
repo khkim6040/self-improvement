@@ -19,7 +19,36 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const SafetyDetectionPage(),
+      home: const StartPage(), // 앱 시작 시 StartPage로 이동
+    );
+  }
+}
+
+class StartPage extends StatelessWidget {
+  const StartPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('주행 시작'),
+      ),
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const SafetyDetectionPage(),
+              ),
+            );
+          },
+          child: const Text(
+            "주행 시작",
+            style: TextStyle(fontSize: 20),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -195,6 +224,20 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
                 ),
                 textAlign: TextAlign.center,
               ),
+              // print acceleration data for abrupt acceleration detection
+              Text(
+                "X: ${accelerationHistoryX.last.toStringAsFixed(2)}\n"
+                "Y: ${accelerationHistoryY.last.toStringAsFixed(2)}\n"
+                "Z: ${accelerationHistoryZ.last.toStringAsFixed(2)}",
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              // print recent changes for rough surface detection
+              Text(
+                "Recent Changes: ${_calculateRecentChanges()}",
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         ),
@@ -219,7 +262,6 @@ class _SafetyDetectionPageState extends State<SafetyDetectionPage> {
   }
 }
 
-// 리포트 화면
 class ReportPage extends StatelessWidget {
   final int totalScore;
   final List<Map<String, String>> violations;
@@ -262,6 +304,22 @@ class ReportPage extends StatelessWidget {
                       },
                     ),
                   ),
+            const SizedBox(height: 20),
+            Center(
+              child: ElevatedButton(
+                onPressed: () {
+                  // 데이터를 초기화하고 첫 화면으로 돌아가기
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const StartPage(),
+                    ),
+                    (route) => false, // 모든 기존 경로를 제거
+                  );
+                },
+                child: const Text("확인"),
+              ),
+            ),
           ],
         ),
       ),
