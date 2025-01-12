@@ -26,8 +26,8 @@
 
 ## 설치 방법
 ```sh
-git clone https://github.com/your-username/safety-detection.git
-cd safety-detection
+git clone https://github.com/khkim6040/self_improvement.git
+cd self_improvement/geeko_app
 
 flutter pub get
 
