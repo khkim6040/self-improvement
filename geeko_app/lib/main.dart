@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; // 리포트 시간 표시용
 import 'package:sensors_plus/sensors_plus.dart'; // 가속도 센서 데이터 수집용
+import 'package:flutter_svg/flutter_svg.dart'; // SVG 이미지 사용용
 
 void main() {
   runApp(const MyApp());
@@ -34,19 +35,35 @@ class StartPage extends StatelessWidget {
         title: const Text('주행 시작'),
       ),
       body: Center(
-        child: ElevatedButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const SafetyDetectionPage(),
-              ),
-            );
-          },
-          child: const Text(
-            "주행 시작",
-            style: TextStyle(fontSize: 20),
-          ),
+        // 상단에 로고 이미지 추가
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SvgPicture.asset(
+              'assets/logo.svg',
+              width: 200,
+              height: 200,
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              '안전 운전을 위한\n주행 시작 버튼을 눌러주세요',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                // SafetyDetectionPage로 이동
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SafetyDetectionPage(),
+                  ),
+                );
+              },
+              child: const Text("주행 시작"),
+            ),
+          ],
         ),
       ),
     );
